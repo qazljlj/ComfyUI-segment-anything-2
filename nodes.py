@@ -188,6 +188,7 @@ class Sam2Segmentation:
                 "coordinates_positive": ("STRING", {"forceInput": True}),
                 "coordinates_negative": ("STRING", {"forceInput": True}),
                 "bboxes": ("BBOX", ),
+                "bbox_frame_idx": ("INT", {"default": 0, "min": 0}),
                 "individual_objects": ("BOOLEAN", {"default": False}),
                 "mask": ("MASK", ),
                 
@@ -200,7 +201,7 @@ class Sam2Segmentation:
     CATEGORY = "SAM2"
 
     def segment(self, image, sam2_model, keep_model_loaded, coordinates_positive=None, coordinates_negative=None, 
-                individual_objects=False, bboxes=None, mask=None):
+                individual_objects=False, bboxes=None, bbox_frame_idx=0, mask=None):
         offload_device = mm.unet_offload_device()
         model = sam2_model["model"]
         device = sam2_model["device"]
@@ -354,6 +355,15 @@ class Sam2Segmentation:
                         input_box = None
                 else:
                     input_box = bboxes[0]
+                prompt_frame_idx = int(max(0, min(B - 1, int(bbox_frame_idx)))) if bboxes is not None else 0
+                if bboxes is not None and prompt_frame_idx == 0 and B > 1:
+                    # If frame 0 is black (common with fades/intro), auto-pick first non-black frame.
+                    frame_means = image.mean(dim=(1, 2, 3))
+                    if float(frame_means[0].item()) < 0.01:
+                        non_black_indices = torch.nonzero(frame_means > 0.01, as_tuple=False)
+                        if len(non_black_indices) > 0:
+                            prompt_frame_idx = int(non_black_indices[0].item())
+                            print(f"bbox_frame_idx auto-adjusted to first non-black frame: {prompt_frame_idx}")
                 
                 if individual_objects and bboxes is not None:
                     raise ValueError("bboxes not supported with individual_objects")
@@ -373,7 +383,7 @@ class Sam2Segmentation:
                 else:
                     _, out_obj_ids, out_mask_logits = model.add_new_points_or_box(
                         inference_state=self.inference_state,
-                        frame_idx=0,
+                        frame_idx=prompt_frame_idx,
                         obj_id=1,
                         points=final_coords if coordinates_positive is not None else None, 
                         labels=final_labels if coordinates_positive is not None else None,

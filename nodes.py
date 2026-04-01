@@ -412,9 +412,24 @@ class Sam2Segmentation:
                     for frame_idx, combined_mask in video_segments.items():
                         mask_list.append(combined_mask)
                 else:
-                    for frame_idx, obj_masks in video_segments.items():
-                        for out_obj_id, out_mask in obj_masks.items():
-                            mask_list.append(out_mask)
+                    # Keep exactly one mask per frame to avoid downstream shape mismatches.
+                    for frame_idx in range(B):
+                        obj_masks = video_segments.get(frame_idx, None)
+                        if not obj_masks:
+                            empty_mask = np.zeros((1, image.shape[1], image.shape[2]), dtype=np.uint8)
+                            mask_list.append(empty_mask)
+                            continue
+
+                        merged_mask = None
+                        for out_mask in obj_masks.values():
+                            if merged_mask is None:
+                                merged_mask = out_mask
+                            else:
+                                merged_mask = np.logical_or(merged_mask, out_mask)
+
+                        if merged_mask is None:
+                            merged_mask = np.zeros((1, image.shape[1], image.shape[2]), dtype=np.uint8)
+                        mask_list.append(merged_mask.astype(np.uint8))
 
         if not keep_model_loaded:
             try:
